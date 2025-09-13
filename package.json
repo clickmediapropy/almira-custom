@@ -1,0 +1,38 @@
+{
+  "name": "almira-custom",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sistema personalizado de gestión de leads con IA para Altamira Group",
+  "author": "ClickMedia Pro",
+  "license": "PRIVATE",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "start": "turbo start",
+    "lint": "turbo lint",
+    "test": "turbo test",
+    "clean": "turbo clean",
+    "format": "prettier --write \"**/*.{ts,tsx,md,mdx}\"",
+    "db:push": "supabase db push",
+    "db:pull": "supabase db pull",
+    "db:generate": "supabase gen types typescript --local > packages/database/types.ts",
+    "deploy:web": "vercel --prod",
+    "deploy:functions": "supabase functions deploy --all"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
+    "turbo": "latest",
+    "typescript": "^5.3.3"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=18",
+    "pnpm": ">=8"
+  },
+  "packageManager": "pnpm@8.15.4"
+}
