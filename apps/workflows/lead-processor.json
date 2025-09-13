@@ -1,0 +1,166 @@
+{
+  "name": "lead-processor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hubspot-lead",
+        "responseMode": "onReceived",
+        "responseData": "firstEntryJson",
+        "options": {}
+      },
+      "id": "webhook-receiver",
+      "name": "HubSpot Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const lead = {\n  firstName: items[0].json.properties?.firstname?.value || '',\n  lastName: items[0].json.properties?.lastname?.value || '',\n  email: items[0].json.properties?.email?.value || '',\n  phone: items[0].json.properties?.phone?.value || '',\n  projectInterest: items[0].json.properties?.project_interest?.value || '',\n  source: items[0].json.properties?.hs_lead_source?.value || 'facebook',\n  hubspotId: items[0].json.objectId || items[0].json.vid,\n  createdAt: new Date().toISOString()\n};\n\n// Clean phone number for Paraguay\nif (lead.phone && lead.phone.startsWith('09')) {\n  lead.phone = '+595' + lead.phone.substring(1);\n}\n\nreturn [{json: lead}];"
+      },
+      "id": "extract-lead",
+      "name": "Extract Lead Data",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "leads",
+        "columns": "first_name,last_name,email,phone,project_interest,source,hubspot_id,status",
+        "values": "={{$json.firstName}},={{$json.lastName}},={{$json.email}},={{$json.phone}},={{$json.projectInterest}},={{$json.source}},={{$json.hubspotId}},new"
+      },
+      "id": "store-supabase",
+      "name": "Store in Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [650, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "1",
+          "name": "Supabase Almira"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v18.0/{{$env.WHATSAPP_PHONE_ID}}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "messaging_product",
+              "value": "whatsapp"
+            },
+            {
+              "name": "to",
+              "value": "={{$json.phone}}"
+            },
+            {
+              "name": "type",
+              "value": "template"
+            },
+            {
+              "name": "template",
+              "value": "{\n  \"name\": \"welcome_altamira\",\n  \"language\": {\n    \"code\": \"es\"\n  },\n  \"components\": [\n    {\n      \"type\": \"body\",\n      \"parameters\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"{{$json.firstName}}\"\n        }\n      ]\n    }\n  ]\n}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-whatsapp",
+      "name": "Send Welcome WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [850, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2",
+          "name": "WhatsApp Business API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "messages",
+        "columns": "lead_id,direction,channel,content,status",
+        "values": "={{$json.id}},outbound,whatsapp,Mensaje de bienvenida enviado,sent"
+      },
+      "id": "log-message",
+      "name": "Log Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1050, 300],
+      "credentials": {
+        "supabaseApi": {
+          "id": "1",
+          "name": "Supabase Almira"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "HubSpot Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Lead Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Lead Data": {
+      "main": [
+        [
+          {
+            "node": "Store in Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Supabase": {
+      "main": [
+        [
+          {
+            "node": "Send Welcome WhatsApp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Welcome WhatsApp": {
+      "main": [
+        [
+          {
+            "node": "Log Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 0,
+  "updatedAt": "2025-09-13T00:00:00.000Z",
+  "versionId": "1"
+}

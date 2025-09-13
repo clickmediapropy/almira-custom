@@ -1,0 +1,220 @@
+{
+  "name": "almira-chat-rag",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-message",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "whatsapp-webhook",
+      "name": "WhatsApp Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Extract WhatsApp message data\nconst messageData = items[0].json.entry?.[0]?.changes?.[0]?.value?.messages?.[0];\nconst contactData = items[0].json.entry?.[0]?.changes?.[0]?.value?.contacts?.[0];\n\nif (!messageData) {\n  return [{json: {error: 'No message data'}}];\n}\n\nconst message = {\n  from: messageData.from,\n  text: messageData.text?.body || '',\n  type: messageData.type,\n  timestamp: messageData.timestamp,\n  messageId: messageData.id,\n  contactName: contactData?.profile?.name || 'Cliente'\n};\n\nreturn [{json: message}];"
+      },
+      "id": "extract-message",
+      "name": "Extract Message",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "table": "leads",
+        "returnAll": false,
+        "limit": 1,
+        "filters": {
+          "conditions": [
+            {
+              "column": "phone",
+              "condition": "equals",
+              "value": "={{$json.from}}"
+            }
+          ]
+        }
+      },
+      "id": "get-lead",
+      "name": "Get Lead Info",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SUPABASE_URL}}/functions/v1/chat-with-rag",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "={{$json.text}}"
+            },
+            {
+              "name": "leadId",
+              "value": "={{$json.id}}"
+            },
+            {
+              "name": "projectInterest",
+              "value": "={{$json.project_interest}}"
+            },
+            {
+              "name": "conversationHistory",
+              "value": "[]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "call-rag",
+      "name": "Call RAG Function",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v18.0/{{$env.WHATSAPP_PHONE_ID}}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "messaging_product",
+              "value": "whatsapp"
+            },
+            {
+              "name": "to",
+              "value": "={{$node[\"Extract Message\"].json.from}}"
+            },
+            {
+              "name": "type",
+              "value": "text"
+            },
+            {
+              "name": "text",
+              "value": "{\n  \"body\": \"{{$json.response}}\"\n}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-response",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "messages",
+        "columns": "lead_id,direction,channel,content,status,metadata",
+        "values": "={{$node[\"Get Lead Info\"].json.id}},inbound,whatsapp,={{$node[\"Extract Message\"].json.text}},received,{}"
+      },
+      "id": "log-inbound",
+      "name": "Log Inbound Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [850, 450]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "messages",
+        "columns": "lead_id,direction,channel,content,status,metadata",
+        "values": "={{$node[\"Get Lead Info\"].json.id}},outbound,whatsapp,={{$json.response}},sent,{{JSON.stringify({confidence: $json.confidence, contextUsed: $json.contextUsed})}}"
+      },
+      "id": "log-outbound",
+      "name": "Log Outbound Message",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "WhatsApp Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Message": {
+      "main": [
+        [
+          {
+            "node": "Get Lead Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Lead Info": {
+      "main": [
+        [
+          {
+            "node": "Call RAG Function",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Inbound Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call RAG Function": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Response": {
+      "main": [
+        [
+          {
+            "node": "Log Outbound Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": ["chat", "rag", "whatsapp"],
+  "triggerCount": 0,
+  "updatedAt": "2025-09-13T00:00:00.000Z",
+  "versionId": "1"
+}

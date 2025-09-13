@@ -1,0 +1,244 @@
+{
+  "name": "follow-up-engine",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 2,
+              "unit": "hours"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Every 2 Hours",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "select",
+        "table": "leads",
+        "returnAll": true,
+        "filters": {
+          "conditions": [
+            {
+              "column": "status",
+              "condition": "equals",
+              "value": "new"
+            },
+            {
+              "column": "follow_up_count",
+              "condition": "lessThan",
+              "value": 3
+            },
+            {
+              "column": "last_contact_at",
+              "condition": "lessThan",
+              "value": "={{$now.minus(2, 'hours').toISO()}}"
+            }
+          ]
+        }
+      },
+      "id": "get-unresponsive",
+      "name": "Get Unresponsive Leads",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "const lead = items[0].json;\nconst followUpCount = lead.follow_up_count || 0;\n\nlet message = '';\n\nswitch(followUpCount) {\n  case 0:\n    message = `Hola ${lead.first_name}! 👋 Soy Almira de Altamira Group. Vi que estás interesado en nuestros proyectos. ¿Te gustaría recibir información sobre ${lead.project_interest || 'nuestros desarrollos'}?`;\n    break;\n  case 1:\n    message = `${lead.first_name}, tenemos unidades disponibles con excelentes opciones de financiación. ¿Prefieres agendar una visita presencial o recibir información por WhatsApp?`;\n    break;\n  case 2:\n    message = `${lead.first_name}, última oportunidad! Tenemos promociones especiales este mes. ¿Te gustaría conocerlas? Responde SI para más información.`;\n    break;\n  default:\n    message = 'Gracias por tu interés. Un asesor se contactará contigo pronto.';\n}\n\nreturn [{\n  json: {\n    ...lead,\n    followUpMessage: message,\n    attemptNumber: followUpCount + 1\n  }\n}];"
+      },
+      "id": "generate-message",
+      "name": "Generate Follow-up Message",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v18.0/{{$env.WHATSAPP_PHONE_ID}}/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "messaging_product",
+              "value": "whatsapp"
+            },
+            {
+              "name": "to",
+              "value": "={{$json.phone}}"
+            },
+            {
+              "name": "type",
+              "value": "text"
+            },
+            {
+              "name": "text",
+              "value": "{\n  \"body\": \"{{$json.followUpMessage}}\"\n}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "send-followup",
+      "name": "Send Follow-up",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "table": "leads",
+        "updateKey": "id",
+        "columns": "follow_up_count,last_contact_at",
+        "values": "={{$json.attemptNumber}},={{$now.toISO()}}"
+      },
+      "id": "update-lead",
+      "name": "Update Lead Status",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.attemptNumber}}",
+              "operation": "greaterEquals",
+              "value2": 3
+            }
+          ]
+        }
+      },
+      "id": "check-escalation",
+      "name": "Check if Escalation Needed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "table": "leads",
+        "updateKey": "id",
+        "columns": "status,assigned_to",
+        "values": "needs_human,pending_assignment"
+      },
+      "id": "escalate-to-human",
+      "name": "Escalate to Human",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1450, 250]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "messages",
+        "columns": "lead_id,direction,channel,content,status,metadata",
+        "values": "={{$json.id}},outbound,whatsapp,={{$json.followUpMessage}},sent,{{JSON.stringify({type: 'follow_up', attempt: $json.attemptNumber})}}"
+      },
+      "id": "log-followup",
+      "name": "Log Follow-up",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [1050, 450]
+    }
+  ],
+  "connections": {
+    "Every 2 Hours": {
+      "main": [
+        [
+          {
+            "node": "Get Unresponsive Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Unresponsive Leads": {
+      "main": [
+        [
+          {
+            "node": "Generate Follow-up Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Follow-up Message": {
+      "main": [
+        [
+          {
+            "node": "Send Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Follow-up": {
+      "main": [
+        [
+          {
+            "node": "Update Lead Status",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log Follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Lead Status": {
+      "main": [
+        [
+          {
+            "node": "Check if Escalation Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Escalation Needed": {
+      "main": [
+        [
+          {
+            "node": "Escalate to Human",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "staticData": null,
+  "tags": ["follow-up", "automation"],
+  "triggerCount": 0,
+  "updatedAt": "2025-09-13T00:00:00.000Z",
+  "versionId": "1"
+}
